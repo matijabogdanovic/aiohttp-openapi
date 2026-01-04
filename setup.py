@@ -3,7 +3,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 setuptools.setup(
     name='aiohttp-openapi',
-    version='0.1.8',
+    version='0.1.9',
     author="Matija Bogdanovic",
     author_email="matija.bogdanovic@gmail.com",
     description="OpenAPI documentation builder for aiohttp server.",

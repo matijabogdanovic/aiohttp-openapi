@@ -1,3 +1,4 @@
+import inspect
 import pathlib
 import re
 from typing import Tuple
@@ -6,6 +7,10 @@ from aiohttp import web
 
 
 class AiohttpOpenAPI:
+
+    def __init__(self):
+        self._YAML_DATA = None
+        self.path_prefix = None
 
     def setup_openapi(self, app, path_prefix='', yaml_path=None):
         self.path_prefix = path_prefix if path_prefix[-1] != '/' else path_prefix[:-1]
@@ -50,12 +55,14 @@ class AiohttpOpenAPI:
                 opanapi_docstr, is_skip_verify = self._extract_openapi_docstr(docstr)
                 endpoint_, method_ = self._get_path_method(opanapi_docstr)
                 if not is_skip_verify and (method != method_ or endpoint != endpoint_):
-                    assert False, f'docstr does not match handler definition ({method} {endpoint} != {method_} {endpoint_})'
+                    handler_file = inspect.getfile(route.handler)
+                    assert False, f'Docstr mismatch in {handler_file}: {method} {endpoint} != {method_} {endpoint_}'
 
                 path_with_prefix = f'{self.path_prefix}{endpoint_}'
                 if d_tree.get(path_with_prefix) is None:
                     d_tree[path_with_prefix] = {}
-                d_tree[path_with_prefix][method_] = self._remove_endpoint_and_method(opanapi_docstr)
+                clean_openapi_docstr = self._remove_endpoint_and_method(opanapi_docstr)
+                d_tree[path_with_prefix][method_] = clean_openapi_docstr
 
         # join dict to a single file
         for endpoint in d_tree:
@@ -65,11 +72,12 @@ class AiohttpOpenAPI:
                     self._YAML_DATA += f'\n        {method}:'
                     docstr = d_tree[endpoint][method]
                     self._YAML_DATA += docstr
+        pass
 
 
     def _load_yml(self, yaml_path) -> None:
         """
-        Load global yaml file if one exist.
+        Load a global YAML file if one exists.
         :param yaml_path:
         :return: None
         """
@@ -80,7 +88,8 @@ class AiohttpOpenAPI:
             self._YAML_DATA += 'paths:\n'
 
 
-    def _get_path_method(self, docstr: str) -> Tuple[str, str]:
+    @staticmethod
+    def _get_path_method(docstr: str) -> Tuple[str, str]:
         """
         Check if the first two lines of the docstring match a handler's path & method.
 
@@ -112,23 +121,35 @@ class AiohttpOpenAPI:
         second_new_line = self._find_nth(docstr, '\n', 2)
         return docstr[second_new_line:]
 
-
-    def _extract_openapi_docstr(self, endpoint_doc):
-        # Find Swagger start point in doc
-        endpoint_swagger_start = 0
+    @staticmethod
+    def _extract_openapi_docstr(endpoint_doc):
+        swagger_start = None
         is_skip_verify = False
-        for i, doc_line in enumerate(endpoint_doc):
-            if '---' in doc_line:
-                endpoint_swagger_start = i + 1
-                is_skip_verify = "aiohtt-openapi: skip-verify" in doc_line
+
+        for i, line in enumerate(endpoint_doc):
+            if line.rstrip()[:3] == "---":
+                swagger_start = i + 1
+                is_skip_verify = "aiohtt-openapi: skip-verify" in line
                 break
 
-        out = '\n'.join(endpoint_doc[endpoint_swagger_start:-1])
-        out += '\n'
+        if swagger_start is None:
+            return "", False
+
+        # Everything after --- (raw, untrusted indentation)
+        lines = endpoint_doc[swagger_start:]
+
+        # Remove trailing empty lines
+        while lines and not lines[-1].strip():
+            lines.pop()
+
+        # FORCE indentation — never trust docstring whitespace
+        out = "\n".join(f"    {line.rstrip()}" for line in lines) + "\n"
+
         return out, is_skip_verify
 
 
-    def _find_nth(self, haystack, needle, n):
+    @staticmethod
+    def _find_nth(haystack, needle, n):
         start = haystack.find(needle)
         while start >= 0 and n > 1:
             start = haystack.find(needle, start+len(needle))
