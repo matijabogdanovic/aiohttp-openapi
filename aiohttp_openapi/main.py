@@ -127,7 +127,10 @@ class AiohttpOpenAPI:
         is_skip_verify = False
 
         for i, line in enumerate(endpoint_doc):
-            if line.rstrip()[:3] == "---":
+            # strip() both sides: before Python 3.13 __doc__ keeps the source
+            # indentation, so the marker line is "        ---" — rstrip() alone
+            # never matched it and the whole docstring was treated as non-OpenAPI.
+            if line.strip()[:3] == "---":
                 swagger_start = i + 1
                 is_skip_verify = "aiohtt-openapi: skip-verify" in line
                 break
@@ -142,8 +145,14 @@ class AiohttpOpenAPI:
         while lines and not lines[-1].strip():
             lines.pop()
 
-        # FORCE indentation — never trust docstring whitespace
-        out = "\n".join(f"    {line.rstrip()}" for line in lines) + "\n"
+        # Normalize before forcing indentation: Python 3.13+ auto-dedents
+        # __doc__ while older versions keep the source indentation. Stripping
+        # the common leading indent first makes the output byte-identical on
+        # every Python version; the uniform 4-space prefix then puts the block
+        # at the level the assembler expects.
+        indents = [len(line) - len(line.lstrip()) for line in lines if line.strip()]
+        common_indent = min(indents, default=0)
+        out = "\n".join(f"    {line[common_indent:]}".rstrip() for line in lines) + "\n"
 
         return out, is_skip_verify
 
